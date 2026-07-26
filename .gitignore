@@ -1,0 +1,17 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+*.egg-info/
+build/
+dist/
+.ruff_cache/
+.pytest_cache/
+.DS_Store
+.idea/
+.vscode/
+
+# 수집 데이터는 커밋하지 않음 (공유용 샘플만 예외)
+data/**/*.json
+!data/**/sample.json
