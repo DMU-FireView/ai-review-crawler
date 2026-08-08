@@ -1,8 +1,8 @@
 """오늘의집 상품 및 리뷰 collector.
 
-현재 오늘의집은 기본 headless Chromium 요청에 Access Denied를 반환합니다.
-실행할 때 프로젝트 설정의 ``HEADLESS=false``를 사용해야 합니다.
-stealth 또는 브라우저 fingerprint 변경은 사용하지 않습니다.
+현재 오늘의집은 headless Chromium 요청에 Access Denied를 반환합니다.
+이 collector는 전달받은 설정의 복사본에만 ``headless=False``를 적용합니다.
+전역 설정을 변경하거나 stealth 또는 브라우저 fingerprint 변경을 사용하지 않습니다.
 """
 
 import json
@@ -17,6 +17,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from review_crawler.core.browser import BrowserCollector
 from review_crawler.core.exceptions import ParseError
 from review_crawler.core.models import Product, Review
+from review_crawler.core.settings import Settings, get_settings
 
 SEARCH_URL = "https://ohou.se/search/index"
 PRODUCT_URL = "https://store.ohou.se/goods/{product_id}"
@@ -33,6 +34,16 @@ REVIEW_COUNT_PATTERN = re.compile(r"^리뷰\s+([\d,]+)$")
 class OhouseCollector(BrowserCollector):
     platform = "ohouse"
     label = "오늘의집"
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        # 오늘의집은 실제 검증에서 headless Chromium에 403을 반환했습니다.
+        # 원본/전역 Settings를 변경하지 않고 이 collector 전용 복사본만 사용합니다.
+        source_settings = settings or get_settings()
+        ohouse_settings = source_settings.model_copy(
+            update={"headless": False},
+            deep=True,
+        )
+        super().__init__(settings=ohouse_settings)
 
     async def search_products(self, keyword: str, limit: int = 20) -> list[Product]:
         if limit <= 0:
@@ -175,8 +186,7 @@ class OhouseCollector(BrowserCollector):
         title = await page.title()
         if status == 403 or "Access Denied" in title:
             raise ParseError(
-                f"[{self.platform}] 접근이 거부됐습니다. "
-                "오늘의집은 HEADLESS=false 설정이 필요합니다."
+                f"[{self.platform}] 표시형 Chromium에서도 접근이 거부됐습니다."
             )
         if status is not None and status >= 400:
             raise ParseError(f"[{self.platform}] 페이지 요청 실패: HTTP {status} ({url})")
