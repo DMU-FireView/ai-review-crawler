@@ -10,6 +10,7 @@
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Self
 
 import httpx
@@ -112,3 +113,30 @@ class BaseCollector(ABC):
     async def get_reviews(self, product_id: str, limit: int = 50) -> list[Review]:
         """상품의 리뷰를 수집합니다."""
         raise NotSupportedError(f"{self.platform}: 리뷰 수집을 지원하지 않습니다.")
+
+    # ── 선택 구현 ────────────────────────────────────
+    async def iter_reviews(
+        self, product_id: str, limit: int = 50
+    ) -> AsyncIterator[Review]:
+        """리뷰를 수집되는 대로 하나씩 내보냅니다 (SSE 스트림이 사용).
+
+        구현하지 않아도 됩니다. 기본 동작은 get_reviews 를 그대로 부른 뒤 결과를
+        하나씩 흘려보내는 것이라, 기존 collector 는 아무것도 바꾸지 않아도 스트림이
+        동작합니다. 다만 이 경우 리뷰는 수집이 다 끝난 뒤에야 한꺼번에 나갑니다.
+
+        페이지를 넘겨가며 수집하는 collector 는 이 메서드를 오버라이드해서 한 페이지를
+        받을 때마다 yield 하세요. 그래야 수집이 오래 걸릴 때 앞쪽 리뷰부터 분석 서버로
+        흘려보낼 수 있습니다.
+
+            async def iter_reviews(self, product_id, limit=50):
+                collected = 0
+                for page in range(1, 10):
+                    for review in await self._fetch_page(product_id, page):
+                        if collected >= limit:
+                            return
+                        yield review
+                        collected += 1
+                    await self.polite_wait()
+        """
+        for review in await self.get_reviews(product_id, limit=limit):
+            yield review
