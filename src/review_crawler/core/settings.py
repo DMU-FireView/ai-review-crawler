@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # PostgreSQL 접속 정보 (환경변수 DATABASE_URL 로 덮어쓸 수 있음)
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/review_crawler"
 
+    # 상품+리뷰 묶음이 신선하다고 볼 기준 시간(초). 하나의 job이 상품/리뷰를 함께 갱신하므로
+    # 우선은 둘을 분리하지 않고 하나의 값(리뷰 쪽 6h 기준)으로 둔다.
+    # 상품/리뷰 TTL을 따로 둘지는 Phase 2 이후 실사용 데이터를 보고 재검토한다.
+    collection_ttl_seconds: int = 6 * 60 * 60
+
     # ── 플랫폼별 인증 정보 ──────────────────
     # 자기 플랫폼에 키가 필요하면 여기에 추가하고,
     # .env.example 에도 반드시 빈 값으로 추가하세요.

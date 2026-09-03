@@ -12,6 +12,7 @@ from sqlalchemy import (
     ARRAY,
     BigInteger,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -44,10 +45,18 @@ class ProductRow(Base):
     review_count: Mapped[int | None]
     rating: Mapped[float | None] = mapped_column(Numeric(3, 2))
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)
-    first_collected_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    last_collected_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    first_collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class ReviewRow(Base):
@@ -68,15 +77,23 @@ class ReviewRow(Base):
     content: Mapped[str] = mapped_column(Text)
     rating: Mapped[float | None] = mapped_column(Numeric(3, 2))
     author: Mapped[str | None] = mapped_column(Text)
-    written_at: Mapped[datetime | None]
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     option: Mapped[str | None] = mapped_column("option", Text)
     images: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default="{}")
     helpful_count: Mapped[int | None]
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)
-    first_collected_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    last_collected_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    first_collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class CollectionJob(Base):
@@ -118,13 +135,17 @@ class CollectionJob(Base):
     attempt_count: Mapped[int] = mapped_column(server_default="0")
     max_attempts: Mapped[int] = mapped_column(server_default="3")
     locked_by: Mapped[str | None] = mapped_column(Text)
-    locked_at: Mapped[datetime | None]
-    lease_expires_at: Mapped[datetime | None]
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     requested_by: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
-    completed_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AnalysisJob(Base):
@@ -165,8 +186,12 @@ class AnalysisJob(Base):
     attempt_count: Mapped[int] = mapped_column(server_default="0")
     max_attempts: Mapped[int] = mapped_column(server_default="3")
     locked_by: Mapped[str | None] = mapped_column(Text)
-    locked_at: Mapped[datetime | None]
-    lease_expires_at: Mapped[datetime | None]
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
-    completed_at: Mapped[datetime | None]
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
