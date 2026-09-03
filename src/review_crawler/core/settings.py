@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # 수집 결과 저장 위치 (환경변수 DATA_DIR 로 덮어쓸 수 있음)
     data_dir: Path = PROJECT_ROOT / "data"
 
+    # PostgreSQL 접속 정보 (환경변수 DATABASE_URL 로 덮어쓸 수 있음)
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/review_crawler"
+
     # ── 플랫폼별 인증 정보 ──────────────────
     # 자기 플랫폼에 키가 필요하면 여기에 추가하고,
     # .env.example 에도 반드시 빈 값으로 추가하세요.
