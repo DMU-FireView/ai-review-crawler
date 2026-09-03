@@ -3,18 +3,20 @@
 
 옥션은 Cloudflare 봇 감지로 자동 수집이 막혀 있습니다(collector.py 상단 주석 참고).
 그래서 브라우저로 직접 옥션에 들어가 보면서, 필요한 상품/리뷰 정보를 손으로
-입력하면 표준 스키마(Product/Review)로 검증한 뒤 다른 collector 와 동일한
-`data/auction/{products|reviews}_{타임스탬프}.json` 형식으로 저장해주는 스크립트입니다.
+입력하면 표준 스키마(Product/Review)로 검증한 뒤 다른 collector 와 동일하게
+DB(products/reviews 테이블)에 저장해주는 스크립트입니다.
 
     python -m review_crawler.collectors.auction.manual_entry products
     python -m review_crawler.collectors.auction.manual_entry reviews
 """
 
+import asyncio
 import sys
 
 import questionary
 
-from review_crawler.core import storage
+from review_crawler.core.db.base import session_scope
+from review_crawler.core.db.repository import ProductRepository, ReviewRepository
 from review_crawler.core.models import Product, Review
 
 PLATFORM = "auction"
@@ -108,6 +110,28 @@ def collect_reviews() -> list[Review]:
     return reviews
 
 
+async def _save_products(products: list[Product]) -> None:
+    async with session_scope() as session:
+        repo = ProductRepository(session)
+        for product in products:
+            await repo.upsert(product)
+
+
+async def _save_reviews(product_id: str, reviews: list[Review]) -> None:
+    async with session_scope() as session:
+        product_repo = ProductRepository(session)
+        existing = await product_repo.get(PLATFORM, product_id)
+        if existing is None:
+            # reviews 는 products 를 FK 로 참조하므로, 없으면 최소 정보로 먼저 만든다.
+            print(f"\n'{product_id}' 상품이 아직 DB에 없습니다. 최소 정보를 입력하세요.")
+            name = _ask("상품명", required=True)
+            url = _ask("상품 URL", required=True)
+            await product_repo.upsert(
+                Product(platform=PLATFORM, product_id=product_id, name=name, url=url)
+            )
+        await ReviewRepository(session).upsert_many(PLATFORM, product_id, reviews)
+
+
 def main() -> None:
     kind = sys.argv[1] if len(sys.argv) > 1 else None
     if kind not in ("products", "reviews"):
@@ -124,8 +148,11 @@ def main() -> None:
         print("입력된 항목이 없습니다. 저장하지 않습니다.")
         return
 
-    path = storage.save(PLATFORM, kind, items)
-    print(f"\n{len(items)}건 저장 완료: {path}")
+    if kind == "products":
+        asyncio.run(_save_products(items))
+    else:
+        asyncio.run(_save_reviews(items[0].product_id, items))
+    print(f"\n{len(items)}건 DB 저장 완료")
 
 
 if __name__ == "__main__":
