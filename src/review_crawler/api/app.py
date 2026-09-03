@@ -11,9 +11,10 @@ from collections.abc import AsyncIterator
 from functools import lru_cache
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
+from review_crawler.api import v1
 from review_crawler.api.sse import (
     EVENT_DONE,
     EVENT_ERROR,
@@ -34,6 +35,21 @@ from review_crawler.core.exceptions import CollectorError, NotSupportedError
 from review_crawler.core.models import Review
 
 app = FastAPI(title="ai-review-crawler", version="0.1.0")
+app.include_router(v1.router)
+
+
+@app.exception_handler(HTTPException)
+async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+    """모든 엔드포인트가 {"error": {code, message, detail}} 형식으로 응답하게 통일한다.
+
+    기존 데모 엔드포인트는 detail 에 그냥 문자열을 넣으므로, 그 경우는 여기서
+    같은 형식으로 감싸준다.
+    """
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        body = exc.detail
+    else:
+        body = {"error": {"code": "ERROR", "message": str(exc.detail), "detail": None}}
+    return JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
 
 
 @lru_cache
