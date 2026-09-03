@@ -39,7 +39,7 @@ crawler reviews elevenst 123456 -n 100    # 특정 상품의 리뷰 수집
 crawler serve                             # 결과 확인용 API 서버 (localhost:8000/docs)
 ```
 
-수집 결과는 `data/{platform}/{products|reviews}_{타임스탬프}.json` 에 저장됩니다.
+수집 결과는 PostgreSQL(`products`/`reviews` 테이블)에 저장됩니다. `.env`의 `DATABASE_URL`로 접속 정보를 지정하고, `alembic upgrade head`로 스키마를 먼저 적용하세요.
 
 ## collector 만들기
 

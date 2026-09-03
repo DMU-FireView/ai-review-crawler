@@ -12,8 +12,9 @@ import asyncio
 import questionary
 import typer
 
-from review_crawler.core import storage
 from review_crawler.core.base import BaseCollector
+from review_crawler.core.db.base import session_scope
+from review_crawler.core.db.repository import ProductRepository, ReviewRepository
 from review_crawler.core.discovery import discover
 from review_crawler.core.exceptions import CollectorError, NotSupportedError
 from review_crawler.core.settings import ENV_FILE, env_file_exists
@@ -63,7 +64,7 @@ def list_collectors() -> None:
 def collect(
     keyword: str = typer.Option(None, "--keyword", "-k", help="검색 키워드"),
     limit: int = typer.Option(20, "--limit", "-n", help="수집 개수"),
-    save: bool = typer.Option(True, "--save/--no-save", help="결과를 JSON 으로 저장"),
+    save: bool = typer.Option(True, "--save/--no-save", help="결과를 DB 에 저장"),
 ) -> None:
     """대화형으로 플랫폼을 선택해 상품을 수집합니다."""
     _require_env()
@@ -96,7 +97,7 @@ def reviews(
     platform: str = typer.Argument(help="플랫폼 식별자 (crawler list 로 확인)"),
     product_id: str = typer.Argument(help="해당 플랫폼의 상품 ID"),
     limit: int = typer.Option(50, "--limit", "-n", help="수집 개수"),
-    save: bool = typer.Option(True, "--save/--no-save", help="결과를 JSON 으로 저장"),
+    save: bool = typer.Option(True, "--save/--no-save", help="결과를 DB 에 저장"),
 ) -> None:
     """특정 상품의 리뷰를 수집합니다."""
     _require_env()
@@ -127,8 +128,11 @@ async def _collect_products(
                 products = await collector.search_products(keyword, limit=limit)
             typer.echo(f"  {len(products)}건 수집")
             if do_save and products:
-                path = storage.save(name, "products", products)
-                typer.echo(f"  저장: {path}")
+                async with session_scope() as session:
+                    repo = ProductRepository(session)
+                    for product in products:
+                        await repo.upsert(product)
+                typer.echo(f"  DB 저장 완료 ({len(products)}건)")
         except NotSupportedError as exc:
             typer.secho(f"  건너뜀: {exc}", fg=typer.colors.YELLOW)
         except CollectorError as exc:
@@ -148,10 +152,14 @@ async def _collect_reviews(
     try:
         async with collector_cls() as collector:
             items = await collector.get_reviews(product_id, limit=limit)
+            # reviews 는 products 를 FK 로 참조하므로, 저장 전에 상품도 함께 확보한다.
+            product = await collector.get_product(product_id) if do_save and items else None
         typer.echo(f"  {len(items)}건 수집")
         if do_save and items:
-            path = storage.save(platform, "reviews", items)
-            typer.echo(f"  저장: {path}")
+            async with session_scope() as session:
+                await ProductRepository(session).upsert(product)
+                await ReviewRepository(session).upsert_many(platform, product_id, items)
+            typer.echo(f"  DB 저장 완료 ({len(items)}건)")
     except NotSupportedError as exc:
         typer.secho(f"  건너뜀: {exc}", fg=typer.colors.YELLOW)
     except CollectorError as exc:

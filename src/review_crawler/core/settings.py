@@ -33,9 +33,6 @@ class Settings(BaseSettings):
     request_delay: float = 1.0
     headless: bool = True
 
-    # 수집 결과 저장 위치 (환경변수 DATA_DIR 로 덮어쓸 수 있음)
-    data_dir: Path = PROJECT_ROOT / "data"
-
     # PostgreSQL 접속 정보 (환경변수 DATABASE_URL 로 덮어쓸 수 있음)
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/review_crawler"
 
