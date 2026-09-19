@@ -22,8 +22,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from review_crawler.core.base import BaseCollector
+from review_crawler.core.browser import BrowserCollector
 from review_crawler.core.db.repository import (
     DEFAULT_LEASE_SECONDS,
+    DEFAULT_PLATFORM_CAP,
     CollectionJobRepository,
     ProductRepository,
     ReviewRepository,
@@ -31,6 +33,7 @@ from review_crawler.core.db.repository import (
 from review_crawler.core.discovery import discover
 from review_crawler.core.exceptions import CollectorError
 from review_crawler.core.models import Product, Review
+from review_crawler.core.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,20 +62,53 @@ class _Collected:
     errors: list[str] = field(default_factory=list)
 
 
+def _is_browser_based(collector_cls: type[BaseCollector]) -> bool:
+    """Chromium 을 띄우는 collector 인지. 플랫폼 이름을 하드코딩하지 않기 위해 클래스로 판별한다."""
+    return issubclass(collector_cls, BrowserCollector)
+
+
+def _platform_caps(
+    registry: dict[str, type[BaseCollector]], settings: Settings
+) -> dict[str, int]:
+    """플랫폼별 동시 실행 상한. 브라우저 기반은 자원을 훨씬 많이 쓰므로 따로 잡는다."""
+    return {
+        platform: (
+            settings.max_concurrent_browser_jobs_per_platform
+            if _is_browser_based(cls)
+            else settings.max_concurrent_jobs_per_platform
+        )
+        for platform, cls in registry.items()
+    }
+
+
+def _collect_timeout(collector_cls: type[BaseCollector], settings: Settings) -> float:
+    if _is_browser_based(collector_cls):
+        return settings.browser_collect_timeout_seconds
+    return settings.collect_timeout_seconds
+
+
 async def run_once(
     session_factory: SessionFactory,
     worker_id: str,
     *,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    settings: Settings | None = None,
 ) -> bool:
     """job 하나를 claim 해서 처리한다. 처리할 job이 없으면 False를 반환한다."""
+    settings = settings or get_settings()
     await _fail_exhausted(session_factory)
 
-    claim = await _claim(session_factory, worker_id, lease_seconds)
+    registry, _ = discover()
+    claim = await _claim(
+        session_factory,
+        worker_id,
+        lease_seconds,
+        platform_caps=_platform_caps(registry, settings),
+        default_cap=settings.max_concurrent_jobs_per_platform,
+    )
     if claim is None:
         return False
 
-    registry, _ = discover()
     collector_cls = registry.get(claim.platform)
     if collector_cls is None:
         await _finish(
@@ -84,9 +120,20 @@ async def run_once(
         )
         return True
 
+    timeout = _collect_timeout(collector_cls, settings)
     heartbeat = asyncio.create_task(_heartbeat(session_factory, claim, lease_seconds))
     try:
-        collected = await _collect(collector_cls, claim)
+        # 멈춘 브라우저 페이지 하나가 워커를 영원히 붙잡지 않게 한다. heartbeat 가
+        # lease 를 계속 연장하므로 타임아웃이 없으면 job 이 끝나지 않는다.
+        collected = await asyncio.wait_for(_collect(collector_cls, claim), timeout)
+    except TimeoutError:
+        collected = _Collected(errors=[f"수집 시간 초과 ({timeout:.0f}초)"])
+        logger.warning(
+            "[%s/%s] 수집이 %.0f초를 넘겨 중단했습니다.",
+            claim.platform,
+            claim.product_id,
+            timeout,
+        )
     finally:
         heartbeat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -109,6 +156,7 @@ async def run_forever(
     *,
     poll_interval: float = POLL_INTERVAL,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    settings: Settings | None = None,
 ) -> None:
     """처리할 job 이 나올 때까지 폴링하며 계속 돈다.
 
@@ -118,7 +166,9 @@ async def run_forever(
     logger.info("워커 시작 (id=%s)", worker_id)
     while True:
         try:
-            processed = await run_once(session_factory, worker_id, lease_seconds=lease_seconds)
+            processed = await run_once(
+                session_factory, worker_id, lease_seconds=lease_seconds, settings=settings
+            )
         except Exception:  # noqa: BLE001 - 워커는 어떤 job 오류에도 계속 살아 있어야 한다
             logger.exception("job 처리 중 예상치 못한 오류. 워커는 계속 실행합니다.")
             processed = False
@@ -140,10 +190,20 @@ async def _fail_exhausted(session_factory: SessionFactory) -> None:
 
 
 async def _claim(
-    session_factory: SessionFactory, worker_id: str, lease_seconds: int
+    session_factory: SessionFactory,
+    worker_id: str,
+    lease_seconds: int,
+    *,
+    platform_caps: dict[str, int] | None = None,
+    default_cap: int = DEFAULT_PLATFORM_CAP,
 ) -> _Claim | None:
     async with session_factory() as session:
-        job = await CollectionJobRepository(session).claim_one(worker_id, lease_seconds)
+        job = await CollectionJobRepository(session).claim_one(
+            worker_id,
+            lease_seconds,
+            platform_caps=platform_caps,
+            default_cap=default_cap,
+        )
         if job is None:
             return None
         claim = _Claim(
