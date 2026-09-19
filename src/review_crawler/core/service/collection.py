@@ -16,6 +16,7 @@ from review_crawler.core.db.repository import (
     CollectionJobRepository,
     ProductRepository,
     ReviewRepository,
+    validate_review_cursor,
 )
 from review_crawler.core.settings import Settings, get_settings
 
@@ -46,6 +47,10 @@ class CollectionService:
         review_limit: int = 20,
         review_cursor: str | None = None,
     ) -> CollectionResult:
+        # 상품 유무와 무관하게 입력부터 검증한다.
+        if review_cursor is not None:
+            validate_review_cursor(review_cursor)
+
         product = await self.products.get(platform, product_id)
 
         if product is not None and self._is_fresh(product):

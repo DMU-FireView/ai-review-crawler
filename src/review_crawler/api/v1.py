@@ -4,23 +4,28 @@ TTL 기반 하이브리드 조회 API.
 specs/2026-09-03-api-contract.md 의 계약을 구현한다.
 """
 
+from collections.abc import AsyncIterator
 from datetime import datetime
-from functools import lru_cache
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from review_crawler.core.db.base import create_engine, create_session_factory
 from review_crawler.core.db.models import CollectionJob, ProductRow, ReviewRow
+from review_crawler.core.db.repository import InvalidCursorError
 from review_crawler.core.service.collection import CollectionResult, CollectionService
 
 router = APIRouter(prefix="/api/v1")
 
 
-@lru_cache
-def _session_factory() -> async_sessionmaker[AsyncSession]:
-    return create_session_factory(create_engine())
+async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """앱 수명에 묶인 엔진에서 요청당 세션을 하나 연다(app.py 의 lifespan 참고)."""
+    async with request.app.state.session_factory() as session:
+        yield session
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 def _api_error(status_code: int, code: str, message: str, detail: object = None) -> HTTPException:
@@ -95,26 +100,28 @@ def _build_body(result: CollectionResult) -> dict:
 async def get_product(
     platform: str,
     product_id: str,
+    session: SessionDep,
     cursor: str | None = None,
     limit: int = Query(20, ge=1, le=100),
 ) -> JSONResponse:
-    session_factory = _session_factory()
-    async with session_factory() as session:
-        service = CollectionService(session)
+    service = CollectionService(session)
+    try:
         result = await service.get_or_queue(
             platform, product_id, review_limit=limit, review_cursor=cursor
         )
-        await session.commit()
+    except InvalidCursorError as exc:
+        raise _api_error(
+            400, "INVALID_CURSOR", "cursor 값이 올바르지 않습니다.", str(exc)
+        ) from exc
+    await session.commit()
 
     status_code = 202 if result.status == "queued" else 200
     return JSONResponse(status_code=status_code, content=_build_body(result))
 
 
 @router.get("/jobs/{job_id}")
-async def get_job(job_id: int) -> dict:
-    session_factory = _session_factory()
-    async with session_factory() as session:
-        job = await session.get(CollectionJob, job_id)
+async def get_job(job_id: int, session: SessionDep) -> dict:
+    job = await session.get(CollectionJob, job_id)
 
     if job is None:
         raise _api_error(404, "NOT_FOUND", "job을 찾을 수 없습니다.")

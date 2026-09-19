@@ -8,10 +8,13 @@
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from review_crawler.api import v1
@@ -30,26 +33,79 @@ from review_crawler.api.sse import (
     progress_data,
 )
 from review_crawler.core.base import BaseCollector
+from review_crawler.core.db.base import create_engine, create_session_factory
 from review_crawler.core.discovery import LoadFailure, discover
 from review_crawler.core.exceptions import CollectorError, NotSupportedError
 from review_crawler.core.models import Review
 
-app = FastAPI(title="ai-review-crawler", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """DB 엔진을 앱 수명에 묶는다.
+
+    모듈 전역에 캐시해두면 엔진이 만들어질 때의 이벤트 루프에 asyncpg 커넥션이
+    묶인 채 루프가 바뀌어도 재사용되고, 종료 시 커넥션 풀도 정리되지 않는다.
+    """
+    engine = create_engine()
+    app.state.db_engine = engine
+    app.state.session_factory = create_session_factory(engine)
+    try:
+        yield
+    finally:
+        await engine.dispose()
+
+
+app = FastAPI(title="ai-review-crawler", version="0.1.0", lifespan=lifespan)
 app.include_router(v1.router)
+
+
+# 상태 코드만 있고 code 가 지정되지 않은 오류(기존 데모 라우트)를 위한 기본 매핑.
+# Spring 쪽이 error.code 로 분기할 수 있어야 하므로 전부 "ERROR" 로 뭉뚱그리지 않는다.
+_STATUS_CODES = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    501: "NOT_SUPPORTED",
+}
 
 
 @app.exception_handler(HTTPException)
 async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
     """모든 엔드포인트가 {"error": {code, message, detail}} 형식으로 응답하게 통일한다.
 
-    기존 데모 엔드포인트는 detail 에 그냥 문자열을 넣으므로, 그 경우는 여기서
-    같은 형식으로 감싸준다.
+    기존 데모 엔드포인트는 detail 에 그냥 문자열을 넣으므로, 그 경우는 상태 코드에
+    맞는 code 를 붙여 같은 형식으로 감싸준다.
     """
     if isinstance(exc.detail, dict) and "error" in exc.detail:
-        body = exc.detail
-    else:
-        body = {"error": {"code": "ERROR", "message": str(exc.detail), "detail": None}}
+        return JSONResponse(
+            status_code=exc.status_code, content=exc.detail, headers=exc.headers
+        )
+
+    code = _STATUS_CODES.get(exc.status_code, "INTERNAL_ERROR")
+    body = {"error": {"code": code, "message": str(exc.detail), "detail": None}}
     return JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _handle_validation_error(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """검증 실패도 같은 오류 형식으로 내보낸다.
+
+    FastAPI 기본 핸들러는 {"detail": [...]} 를 쓰는데, 그러면 호출 측이 오류 형식을
+    두 가지로 나눠 파싱해야 한다.
+    """
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "요청 값이 올바르지 않습니다.",
+                "detail": jsonable_encoder(exc.errors()),
+            }
+        },
+    )
 
 
 @lru_cache

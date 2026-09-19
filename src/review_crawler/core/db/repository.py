@@ -40,10 +40,38 @@ def _encode_review_cursor(written_at: datetime | None, review_id: str) -> str:
     return base64.urlsafe_b64encode(payload.encode()).decode()
 
 
+class InvalidCursorError(ValueError):
+    """cursor 가 손상됐거나 이 API 가 만든 값이 아닐 때.
+
+    cursor 는 클라이언트가 그대로 돌려주는 값이라 얼마든지 변조될 수 있다. 디코딩
+    실패를 그대로 흘려보내면 클라이언트 입력 오류가 500 으로 보고된다.
+    """
+
+
 def _decode_review_cursor(cursor: str) -> tuple[datetime | None, str]:
-    written_at_raw, review_id = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
-    written_at = datetime.fromisoformat(written_at_raw) if written_at_raw else None
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        written_at_raw, review_id = json.loads(raw)
+        written_at = datetime.fromisoformat(written_at_raw) if written_at_raw else None
+    except (ValueError, TypeError, UnicodeDecodeError) as exc:
+        raise InvalidCursorError(str(exc)) from exc
+
+    if not isinstance(review_id, str):
+        raise InvalidCursorError("review_id 가 문자열이 아닙니다.")
+    if written_at is not None and written_at.tzinfo is None:
+        # 우리가 만든 cursor 는 항상 timezone 을 포함한다. 없으면 변조된 값이며,
+        # 그대로 쓰면 DB 의 timestamptz 와 비교하다 터진다.
+        raise InvalidCursorError("timezone 정보가 없는 시각입니다.")
     return written_at, review_id
+
+
+def validate_review_cursor(cursor: str) -> None:
+    """cursor 형식만 검증한다.
+
+    조회 결과가 없더라도(상품이 아직 없더라도) 잘못된 cursor 는 잘못된 입력이다.
+    list_page 안에서만 검증하면 cold start 경로에서는 검증이 통째로 생략된다.
+    """
+    _decode_review_cursor(cursor)
 
 
 class ProductRepository:
