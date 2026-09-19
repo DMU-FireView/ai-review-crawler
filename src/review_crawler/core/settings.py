@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     product_ttl_seconds: int = 24 * 60 * 60
     review_ttl_seconds: int = 6 * 60 * 60
 
+    # 한 플랫폼에서 동시에 running 상태일 수 있는 job 수. 워커 프로세스 하나는 job 을
+    # 순차 처리하므로, 이 값은 워커를 여러 개 띄웠을 때의 상한이다.
+    # 브라우저 기반 collector 는 수집마다 Chromium 을 띄우므로 훨씬 낮게 잡는다.
+    max_concurrent_jobs_per_platform: int = 4
+    max_concurrent_browser_jobs_per_platform: int = 1
+
+    # 수집 한 건에 허용할 시간(초). 넘기면 job 을 실패로 남기고 다음 job 으로 넘어간다.
+    # 브라우저는 페이지 렌더링까지 기다려야 해서 더 넉넉히 준다.
+    collect_timeout_seconds: float = 120.0
+    browser_collect_timeout_seconds: float = 300.0
+
     # ── 플랫폼별 인증 정보 ──────────────────
     # 자기 플랫폼에 키가 필요하면 여기에 추가하고,
     # .env.example 에도 반드시 빈 값으로 추가하세요.

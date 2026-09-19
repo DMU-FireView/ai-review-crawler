@@ -23,6 +23,9 @@ from review_crawler.core.models import Product, Review
 # 죽은 워커로 간주하고 job을 회수한다. 수집이 길어질 때는 heartbeat로 연장한다.
 DEFAULT_LEASE_SECONDS = 120
 
+# 플랫폼별 상한이 따로 지정되지 않았을 때 쓰는 기본 동시 실행 상한.
+DEFAULT_PLATFORM_CAP = 4
+
 _REVIEW_UPDATE_COLUMNS = (
     "content",
     "rating",
@@ -229,12 +232,22 @@ class CollectionJobRepository:
             return existing, False
 
     async def claim_one(
-        self, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS
+        self,
+        worker_id: str,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        *,
+        platform_caps: dict[str, int] | None = None,
+        default_cap: int = DEFAULT_PLATFORM_CAP,
     ) -> CollectionJob | None:
         """PENDING이거나 lease가 만료된 RUNNING job 하나를 원자적으로 가져간다.
 
         시도 횟수를 이미 채운 job은 후보에서 뺀다. 그러지 않으면 워커를 계속 죽이는
         job 하나가 영원히 재시도되며 큐를 막는다. 빠진 job은 fail_exhausted()가 정리한다.
+
+        platform_caps 로 플랫폼별 동시 실행 상한을 건다. 브라우저를 띄우는 collector 가
+        여러 워커에서 한꺼번에 도는 것을 막기 위한 것이다. 상한 검사와 row 잠금이 한
+        트랜잭션 안에서 원자적이지는 않아서, 여러 워커가 정확히 같은 순간에 claim 하면
+        상한을 1~2개 넘길 수 있다. 자원 보호가 목적이라 이 정도 오차는 허용한다.
         """
         stmt = text(
             """
@@ -246,13 +259,21 @@ class CollectionJobRepository:
                 attempt_count = attempt_count + 1,
                 updated_at = now()
             WHERE id = (
-                SELECT id FROM collection_jobs
-                WHERE attempt_count < max_attempts
+                SELECT j.id FROM collection_jobs j
+                WHERE j.attempt_count < j.max_attempts
                   AND (
-                      status = 'pending'
-                      OR (status = 'running' AND lease_expires_at < now())
+                      j.status = 'pending'
+                      OR (j.status = 'running' AND j.lease_expires_at < now())
                   )
-                ORDER BY created_at
+                  AND (
+                      SELECT count(*) FROM collection_jobs busy
+                      WHERE busy.platform = j.platform
+                        AND busy.status = 'running'
+                        AND busy.lease_expires_at > now()
+                  ) < coalesce(
+                      (cast(:platform_caps as jsonb) ->> j.platform)::int, :default_cap
+                  )
+                ORDER BY j.created_at
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
@@ -260,7 +281,13 @@ class CollectionJobRepository:
             """
         )
         result = await self.session.execute(
-            stmt, {"worker_id": worker_id, "lease_seconds": lease_seconds}
+            stmt,
+            {
+                "worker_id": worker_id,
+                "lease_seconds": lease_seconds,
+                "platform_caps": json.dumps(platform_caps or {}),
+                "default_cap": default_cap,
+            },
         )
         row = result.first()
         if row is None:
