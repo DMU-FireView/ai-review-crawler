@@ -5,8 +5,8 @@ DATABASE_URL(환경변수 또는 core/settings.py 기본값)로 접속을 시도
 해당 모듈 전체를 skip한다 — 로컬에 Postgres가 없어도 나머지 테스트는 그대로 돈다.
 
 engine(모듈 스코프)은 스키마 생성/정리만 담당한다. asyncpg 연결은 이벤트 루프에
-묶이는데, pytest-asyncio 기본값은 테스트마다 새 루프를 쓰므로 세션용 엔진은
-테스트마다(session fixture, 함수 스코프) 새로 만든다.
+묶이는데, pytest-asyncio 기본값은 테스트마다 새 루프를 쓰므로 실제로 쓰는 엔진은
+테스트마다 새로 만든다.
 """
 
 import os
@@ -43,17 +43,33 @@ async def engine():
 
 
 @pytest.fixture
-async def session(engine):
-    eng = create_async_engine(DATABASE_URL)
+async def _clean_db(engine):
+    """각 테스트가 이전 테스트의 commit된 row에 영향받지 않도록 매번 비운다.
 
-    # 각 테스트가 이전 테스트의 commit된 row에 영향받지 않도록 매번 비운다.
-    # (rollback은 이 세션 안에서 커밋 안 한 변경만 되돌리므로 그것만으로는 부족하다.)
+    session fixture의 rollback은 그 세션에서 커밋하지 않은 변경만 되돌리므로
+    그것만으로는 부족하다. session과 session_factory가 함께 쓰여도 fixture 캐싱
+    덕분에 이 정리는 테스트당 한 번만 돈다.
+    """
+    eng = create_async_engine(DATABASE_URL)
     async with eng.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             await conn.execute(table.delete())
+    await eng.dispose()
 
+
+@pytest.fixture
+async def session(_clean_db):
+    eng = create_async_engine(DATABASE_URL)
     factory = create_session_factory(eng)
     async with factory() as s:
         yield s
         await s.rollback()
+    await eng.dispose()
+
+
+@pytest.fixture
+async def session_factory(_clean_db):
+    """워커용. 워커는 짧은 트랜잭션을 여러 번 열므로 세션이 아니라 팩토리를 받는다."""
+    eng = create_async_engine(DATABASE_URL)
+    yield create_session_factory(eng)
     await eng.dispose()

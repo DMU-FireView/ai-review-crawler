@@ -4,20 +4,25 @@
     crawler list                              등록된 collector 목록
     crawler collect                           대화형으로 선택해 상품 수집
     crawler reviews <platform> <product_id>   특정 상품의 리뷰 수집
+    crawler worker                            수집 job 을 처리하는 워커 실행
     crawler serve                             결과 확인용 FastAPI 서버 실행
 """
 
 import asyncio
+import logging
+import os
+import socket
 
 import questionary
 import typer
 
 from review_crawler.core.base import BaseCollector
-from review_crawler.core.db.base import session_scope
+from review_crawler.core.db.base import create_engine, create_session_factory, session_scope
 from review_crawler.core.db.repository import ProductRepository, ReviewRepository
 from review_crawler.core.discovery import discover
 from review_crawler.core.exceptions import CollectorError, NotSupportedError
 from review_crawler.core.settings import ENV_FILE, env_file_exists
+from review_crawler.worker import collection_worker
 
 app = typer.Typer(help="커머스 리뷰 수집 도구", no_args_is_help=True)
 
@@ -166,6 +171,49 @@ async def _collect_reviews(
         typer.secho(f"  실패: {exc}", fg=typer.colors.RED)
     except Exception as exc:  # noqa: BLE001
         typer.secho(f"  예외: {type(exc).__name__}: {exc}", fg=typer.colors.RED)
+
+
+@app.command()
+def worker(
+    once: bool = typer.Option(False, "--once", help="job 을 하나만 처리하고 종료합니다"),
+    poll_interval: float = typer.Option(
+        5.0, "--poll-interval", help="처리할 job 이 없을 때 다음 확인까지 대기(초)"
+    ),
+) -> None:
+    """수집 job 을 처리하는 워커를 실행합니다.
+
+    API 는 TTL 이 지난 요청에 job 만 만들어두고 바로 응답합니다. 실제 크롤링은 이
+    워커가 합니다. 워커를 띄우지 않으면 job 이 pending 으로 쌓이기만 합니다.
+    """
+    _require_env()
+    # 워커는 오래 떠 있으므로 진행 상황과 실패가 보여야 한다.
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    )
+    try:
+        asyncio.run(_run_worker(once, poll_interval))
+    except KeyboardInterrupt:
+        typer.echo("\n워커를 종료합니다.")
+
+
+async def _run_worker(once: bool, poll_interval: float) -> None:
+    # 여러 워커가 같은 job 을 두고 경합할 때 누가 소유자인지 구분할 수 있어야 한다.
+    worker_id = f"{socket.gethostname()}-{os.getpid()}"
+    engine = create_engine()
+    session_factory = create_session_factory(engine)
+    try:
+        if once:
+            processed = await collection_worker.run_once(session_factory, worker_id)
+            typer.echo("job 1건 처리 완료" if processed else "처리할 job 이 없습니다.")
+            return
+        typer.secho(
+            f"워커 시작 (id={worker_id}). Ctrl+C 로 종료합니다.", fg=typer.colors.CYAN
+        )
+        await collection_worker.run_forever(
+            session_factory, worker_id, poll_interval=poll_interval
+        )
+    finally:
+        await engine.dispose()
 
 
 @app.command()
