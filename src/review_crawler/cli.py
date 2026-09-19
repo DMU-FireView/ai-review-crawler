@@ -164,6 +164,7 @@ async def _collect_reviews(
             async with session_scope() as session:
                 await ProductRepository(session).upsert(product)
                 await ReviewRepository(session).upsert_many(platform, product_id, items)
+                await ProductRepository(session).mark_reviews_collected(platform, product_id)
             typer.echo(f"  DB 저장 완료 ({len(items)}건)")
     except NotSupportedError as exc:
         typer.secho(f"  건너뜀: {exc}", fg=typer.colors.YELLOW)

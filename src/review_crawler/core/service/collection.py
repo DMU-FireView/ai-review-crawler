@@ -48,7 +48,7 @@ class CollectionService:
     ) -> CollectionResult:
         product = await self.products.get(platform, product_id)
 
-        if product is not None and self._is_fresh(product.last_collected_at):
+        if product is not None and self._is_fresh(product):
             reviews, next_cursor = await self.reviews.list_page(
                 platform, product_id, limit=review_limit, cursor=review_cursor
             )
@@ -78,9 +78,24 @@ class CollectionService:
             job=job,
         )
 
-    def _is_fresh(self, last_collected_at: datetime) -> bool:
-        ttl = timedelta(seconds=self.settings.collection_ttl_seconds)
+    def _is_fresh(self, product: ProductRow) -> bool:
+        """상품과 리뷰가 '둘 다' 신선할 때만 신선하다고 본다.
+
+        상품만 보고 판단하면, 리뷰 수집이 실패한 부분 실패(partial) 상품이 TTL이
+        끝날 때까지 리뷰 없이 fresh로 굳어 재수집이 막힌다.
+        """
         now = datetime.now(UTC)
-        if last_collected_at.tzinfo is None:
-            last_collected_at = last_collected_at.replace(tzinfo=UTC)
-        return now - last_collected_at < ttl
+        if not self._within(product.last_collected_at, self.settings.product_ttl_seconds, now):
+            return False
+        return self._within(
+            product.reviews_last_collected_at, self.settings.review_ttl_seconds, now
+        )
+
+    @staticmethod
+    def _within(moment: datetime | None, ttl_seconds: int, now: datetime) -> bool:
+        # 한 번도 성공하지 못했으면(None) 신선하지 않다.
+        if moment is None:
+            return False
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        return now - moment < timedelta(seconds=ttl_seconds)

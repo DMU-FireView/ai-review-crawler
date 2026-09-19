@@ -22,7 +22,10 @@ from review_crawler.worker import collection_worker
 
 async def test_fresh_product_returns_immediately(session):
     product = Product(platform="testplat", product_id="ttl-1", name="상품", url="https://x")
-    await ProductRepository(session).upsert(product)
+    repo = ProductRepository(session)
+    await repo.upsert(product)
+    # 상품만 신선해서는 fresh 가 아니다. 리뷰 수집도 성공했어야 한다.
+    await repo.mark_reviews_collected("testplat", "ttl-1")
 
     result = await CollectionService(session).get_or_queue("testplat", "ttl-1")
 

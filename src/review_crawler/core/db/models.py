@@ -51,6 +51,12 @@ class ProductRow(Base):
     last_collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # 이 상품의 리뷰를 마지막으로 '성공적으로' 수집한 시각. 리뷰 수집이 실패하면
+    # 갱신하지 않으므로, 상품만 성공한 부분 실패를 신선하다고 오판하지 않는다.
+    # 리뷰가 실제로 0건이어도 수집 자체가 성공했으면 갱신한다.
+    reviews_last_collected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

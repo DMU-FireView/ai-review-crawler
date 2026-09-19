@@ -10,7 +10,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,6 +72,19 @@ class ProductRepository:
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=["platform", "product_id"], set_=values
+        )
+        await self.session.execute(stmt)
+
+    async def mark_reviews_collected(self, platform: str, product_id: str) -> None:
+        """리뷰 수집이 성공했음을 기록한다. 수집 결과가 0건이어도 호출한다.
+
+        '리뷰가 없는 상품'과 '리뷰를 못 가져온 상품'을 구분하기 위한 표시다. 후자는
+        이 시각이 갱신되지 않아 다음 조회에서 재수집 대상이 된다.
+        """
+        stmt = (
+            update(ProductRow)
+            .where(ProductRow.platform == platform, ProductRow.product_id == product_id)
+            .values(reviews_last_collected_at=datetime.now(UTC), updated_at=datetime.now(UTC))
         )
         await self.session.execute(stmt)
 

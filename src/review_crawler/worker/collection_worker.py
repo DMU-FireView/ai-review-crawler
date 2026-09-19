@@ -245,6 +245,11 @@ async def _persist(
                 await ReviewRepository(session).upsert_many(
                     claim.platform, claim.product_id, collected.reviews
                 )
+                # 0건이어도 '수집 성공'이므로 기록한다. 이걸 빠뜨리면 리뷰 없는
+                # 상품이 매번 재수집 대상이 된다.
+                await ProductRepository(session).mark_reviews_collected(
+                    claim.platform, claim.product_id
+                )
                 await session.commit()
             review_status = "succeeded"
         except SQLAlchemyError as exc:
