@@ -19,6 +19,10 @@ from sqlalchemy.sql import text
 from review_crawler.core.db.models import CollectionJob, ProductRow, ReviewRow
 from review_crawler.core.models import Product, Review
 
+# 워커가 job 하나를 붙잡고 있을 수 있는 기본 시간. 이 시간을 넘기면 다른 워커가
+# 죽은 워커로 간주하고 job을 회수한다. 수집이 길어질 때는 heartbeat로 연장한다.
+DEFAULT_LEASE_SECONDS = 120
+
 _REVIEW_UPDATE_COLUMNS = (
     "content",
     "rating",
@@ -183,8 +187,14 @@ class CollectionJobRepository:
                 raise
             return existing, False
 
-    async def claim_one(self, worker_id: str, lease_seconds: int = 120) -> CollectionJob | None:
-        """PENDING이거나 lease가 만료된 RUNNING job 하나를 원자적으로 가져간다."""
+    async def claim_one(
+        self, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS
+    ) -> CollectionJob | None:
+        """PENDING이거나 lease가 만료된 RUNNING job 하나를 원자적으로 가져간다.
+
+        시도 횟수를 이미 채운 job은 후보에서 뺀다. 그러지 않으면 워커를 계속 죽이는
+        job 하나가 영원히 재시도되며 큐를 막는다. 빠진 job은 fail_exhausted()가 정리한다.
+        """
         stmt = text(
             """
             UPDATE collection_jobs
@@ -192,11 +202,15 @@ class CollectionJobRepository:
                 locked_by = :worker_id,
                 locked_at = now(),
                 lease_expires_at = now() + make_interval(secs => :lease_seconds),
-                attempt_count = attempt_count + 1
+                attempt_count = attempt_count + 1,
+                updated_at = now()
             WHERE id = (
                 SELECT id FROM collection_jobs
-                WHERE status = 'pending'
-                   OR (status = 'running' AND lease_expires_at < now())
+                WHERE attempt_count < max_attempts
+                  AND (
+                      status = 'pending'
+                      OR (status = 'running' AND lease_expires_at < now())
+                  )
                 ORDER BY created_at
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
@@ -214,14 +228,45 @@ class CollectionJobRepository:
         # 있던 객체가 있다면 populate_existing으로 DB 최신값을 강제로 다시 읽는다.
         return await self.session.get(CollectionJob, row.id, populate_existing=True)
 
+    async def renew_lease(
+        self, job_id: int, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS
+    ) -> bool:
+        """아직 이 워커가 소유자일 때만 lease를 연장하고, 연장했는지 여부를 반환한다.
+
+        이미 lease가 만료돼 다른 워커가 가져갔다면 False다. 호출자는 이때 작업을
+        포기해야 한다 — 계속 진행해봐야 완료 기록이 거부된다.
+        """
+        stmt = text(
+            """
+            UPDATE collection_jobs
+            SET lease_expires_at = now() + make_interval(secs => :lease_seconds),
+                updated_at = now()
+            WHERE id = :job_id
+              AND locked_by = :worker_id
+              AND status = 'running'
+              AND lease_expires_at > now()
+            """
+        )
+        result = await self.session.execute(
+            stmt,
+            {"job_id": job_id, "worker_id": worker_id, "lease_seconds": lease_seconds},
+        )
+        return result.rowcount == 1
+
     async def mark_completed(
         self,
         job_id: int,
         *,
+        worker_id: str,
         product_status: str,
         review_status: str,
         error: str | None = None,
-    ) -> None:
+    ) -> bool:
+        """소유권이 유지될 때만 완료 상태로 전이하고, 전이했는지 여부를 반환한다.
+
+        lease가 만료돼 다른 워커가 같은 job을 이미 가져간 뒤라면 아무것도 바꾸지 않는다.
+        늦게 끝난 워커가 새 워커의 진행 상태를 덮어쓰는 것을 막기 위함이다.
+        """
         if product_status == "succeeded" and review_status == "succeeded":
             status = "succeeded"
         elif product_status == "failed" and review_status == "failed":
@@ -229,11 +274,51 @@ class CollectionJobRepository:
         else:
             status = "partial"
 
-        job = await self.session.get(CollectionJob, job_id)
-        if job is None:
-            return
-        job.status = status
-        job.product_status = product_status
-        job.review_status = review_status
-        job.last_error = error
-        job.completed_at = datetime.now(UTC)
+        stmt = text(
+            """
+            UPDATE collection_jobs
+            SET status = :status,
+                product_status = :product_status,
+                review_status = :review_status,
+                last_error = :error,
+                completed_at = now(),
+                updated_at = now()
+            WHERE id = :job_id
+              AND locked_by = :worker_id
+              AND status = 'running'
+              AND lease_expires_at > now()
+            """
+        )
+        result = await self.session.execute(
+            stmt,
+            {
+                "job_id": job_id,
+                "worker_id": worker_id,
+                "status": status,
+                "product_status": product_status,
+                "review_status": review_status,
+                "error": error,
+            },
+        )
+        return result.rowcount == 1
+
+    async def fail_exhausted(self) -> int:
+        """시도 상한을 채운 채 lease가 만료된 job을 failed로 정리하고 건수를 반환한다.
+
+        claim_one이 이런 job을 더 이상 집지 않으므로, 정리해주지 않으면 running 상태로
+        영원히 남는다.
+        """
+        stmt = text(
+            """
+            UPDATE collection_jobs
+            SET status = 'failed',
+                completed_at = now(),
+                updated_at = now(),
+                last_error = coalesce(last_error || ' / ', '') || '최대 시도 횟수 초과'
+            WHERE status = 'running'
+              AND lease_expires_at < now()
+              AND attempt_count >= max_attempts
+            """
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount

@@ -137,47 +137,50 @@ class _ReviewFailingCollector(BaseCollector):
         raise CollectorError("리뷰 수집 실패 시뮬레이션")
 
 
-async def test_worker_processes_job_end_to_end(session, monkeypatch):
+async def test_worker_processes_job_end_to_end(session_factory, monkeypatch):
     monkeypatch.setattr(collection_worker, "discover", lambda: ({"stubplat": _StubCollector}, []))
 
-    jobs = CollectionJobRepository(session)
-    job, _ = await jobs.create_or_get_active("stubplat", "worker-1")
-    await session.commit()
+    async with session_factory() as s:
+        job, _ = await CollectionJobRepository(s).create_or_get_active("stubplat", "worker-1")
+        job_id = job.id
+        await s.commit()
 
-    processed = await collection_worker.run_once(session, "worker-test")
+    processed = await collection_worker.run_once(session_factory, "worker-test")
     assert processed is True
 
-    refreshed = await jobs.get(job.id)
-    assert refreshed.status == "succeeded"
-    assert refreshed.product_status == "succeeded"
-    assert refreshed.review_status == "succeeded"
+    async with session_factory() as s:
+        refreshed = await CollectionJobRepository(s).get(job_id)
+        assert refreshed.status == "succeeded"
+        assert refreshed.product_status == "succeeded"
+        assert refreshed.review_status == "succeeded"
 
-    product_row = await ProductRepository(session).get("stubplat", "worker-1")
-    assert product_row is not None
-    assert product_row.name == "스텁상품"
+        product_row = await ProductRepository(s).get("stubplat", "worker-1")
+        assert product_row is not None
+        assert product_row.name == "스텁상품"
 
 
-async def test_worker_marks_partial_on_review_failure(session, monkeypatch):
+async def test_worker_marks_partial_on_review_failure(session_factory, monkeypatch):
     monkeypatch.setattr(
         collection_worker, "discover", lambda: ({"partialplat": _ReviewFailingCollector}, [])
     )
 
-    jobs = CollectionJobRepository(session)
-    job, _ = await jobs.create_or_get_active("partialplat", "partial-1")
-    await session.commit()
+    async with session_factory() as s:
+        job, _ = await CollectionJobRepository(s).create_or_get_active("partialplat", "partial-1")
+        job_id = job.id
+        await s.commit()
 
-    await collection_worker.run_once(session, "worker-test")
+    await collection_worker.run_once(session_factory, "worker-test")
 
-    refreshed = await jobs.get(job.id)
-    assert refreshed.status == "partial"
-    assert refreshed.product_status == "succeeded"
-    assert refreshed.review_status == "failed"
+    async with session_factory() as s:
+        refreshed = await CollectionJobRepository(s).get(job_id)
+        assert refreshed.status == "partial"
+        assert refreshed.product_status == "succeeded"
+        assert refreshed.review_status == "failed"
 
-    # 상품은 리뷰 실패와 무관하게 커밋되어 있어야 한다.
-    product_row = await ProductRepository(session).get("partialplat", "partial-1")
-    assert product_row is not None
+        # 상품은 리뷰 실패와 무관하게 커밋되어 있어야 한다.
+        assert await ProductRepository(s).get("partialplat", "partial-1") is not None
 
 
-async def test_worker_returns_false_when_no_job_pending(session):
-    processed = await collection_worker.run_once(session, "worker-idle")
+async def test_worker_returns_false_when_no_job_pending(session_factory):
+    processed = await collection_worker.run_once(session_factory, "worker-idle")
     assert processed is False
