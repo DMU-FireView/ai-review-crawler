@@ -16,6 +16,7 @@ from review_data.core.db.repository import (
     CollectionJobRepository,
     ProductRepository,
 )
+from review_data.core.exceptions import ParseError
 from review_data.core.models import Product, Review
 from review_data.worker import collection_worker
 
@@ -230,3 +231,35 @@ async def test_worker_holds_no_db_transaction_during_collection(
         pytest.fail("수집 중 DB 트랜잭션을 들고 있어 외부 쓰기가 lock 대기에 걸렸습니다.")
 
     assert processed is True
+
+
+class _EmptyProductCollector(BaseCollector):
+    """필수 정보를 찾지 못해 ParseError 를 던지는 collector (없는 상품)."""
+
+    platform = PLATFORM
+
+    async def search_products(self, keyword: str, limit: int = 20) -> list[Product]:
+        return []
+
+    async def get_product(self, product_id: str) -> Product:
+        raise ParseError(f"[{self.platform}] 상품 정보를 찾지 못했습니다.")
+
+    async def get_reviews(self, product_id: str, limit: int = 50) -> list[Review]:
+        raise ParseError(f"[{self.platform}] 리뷰를 찾지 못했습니다.")
+
+
+async def test_missing_product_is_recorded_as_failed(session_factory, monkeypatch):
+    """없는 상품 수집은 성공으로 기록되면 안 되고, 빈 row 도 남지 않아야 한다."""
+    monkeypatch.setattr(
+        collection_worker, "discover", lambda: ({PLATFORM: _EmptyProductCollector}, [])
+    )
+    job_id = await _new_job(session_factory, "missing-1")
+
+    await collection_worker.run_once(session_factory, "worker-missing")
+
+    async with session_factory() as s:
+        row = await CollectionJobRepository(s).get(job_id)
+        assert row.status == "failed"
+        assert row.product_status == "failed"
+        # 이름 없는 상품이 저장되어 있으면 안 된다.
+        assert await ProductRepository(s).get(PLATFORM, "missing-1") is None

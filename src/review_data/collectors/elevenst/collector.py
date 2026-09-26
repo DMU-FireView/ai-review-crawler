@@ -15,6 +15,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 from review_data.core.base import BaseCollector
+from review_data.core.exceptions import ParseError
 from review_data.core.models import Product, Review
 
 SEARCH_API = "https://apis.11st.co.kr/search/api/tab/total"
@@ -95,13 +96,22 @@ class ElevenstCollector(BaseCollector):
         response.raise_for_status()
 
         data = self._extract_ld_json(response.text)
+        # 11번가는 없는 상품에도 200 을 준다. JSON-LD 가 없으면 상품이 없거나 페이지
+        # 구조가 바뀐 것이므로, 이름 없는 상품을 만들어 성공으로 넘기면 안 된다.
+        name = data.get("name")
+        if not name:
+            raise ParseError(
+                f"[{self.platform}] 상품 정보를 찾지 못했습니다 (product_id={product_id}). "
+                "없는 상품이거나 페이지 구조가 바뀌었습니다."
+            )
+
         offers = data.get("offers") or {}
         brand = data.get("brand") or {}
 
         return Product(
             platform=self.platform,
             product_id=product_id,
-            name=data.get("name") or "",
+            name=name,
             url=PRODUCT_PAGE.format(pid=product_id),
             brand=brand.get("name") or None,
             price=offers.get("price"),
