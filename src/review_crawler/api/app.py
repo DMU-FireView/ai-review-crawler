@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await engine.dispose()
 
 
-app = FastAPI(title="ai-review-crawler", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="review-data", version="0.1.0", lifespan=lifespan)
 app.include_router(v1.router)
 
 
