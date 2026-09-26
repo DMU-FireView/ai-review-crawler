@@ -74,7 +74,15 @@ class ReviewRow(Base):
             ["products.platform", "products.product_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_reviews_cursor", "platform", "product_id", "written_at"),
+        # 조회 정렬(written_at DESC NULLS LAST, review_id DESC)과 정확히 맞춘다.
+        # 방향이 어긋나면 같은 시각의 리뷰가 많은 상품에서 별도 정렬 비용이 붙는다.
+        Index(
+            "idx_reviews_cursor",
+            "platform",
+            "product_id",
+            text("written_at DESC NULLS LAST"),
+            text("review_id DESC"),
+        ),
     )
 
     platform: Mapped[str] = mapped_column(Text)
