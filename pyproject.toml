@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "review-crawler"
+name = "review-data"
 version = "0.1.0"
-description = "커머스 플랫폼 상품/리뷰 수집 모듈"
+description = "커머스 상품·리뷰 수집 및 조회 Data 서버"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -32,10 +32,10 @@ dev = [
 ]
 
 [project.scripts]
-crawler = "review_crawler.cli:app"
+crawler = "review_data.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/review_crawler"]
+packages = ["src/review_data"]
 
 [tool.ruff]
 line-length = 100

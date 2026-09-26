@@ -48,7 +48,7 @@ PostgreSQL 을 띄우고 스키마를 적용합니다. 접속 정보는 `.env` �
 
 ```bash
 docker run -d --name review-data-pg \
-  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=review_crawler \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=review_data \
   -p 5432:5432 postgres:16-alpine
 
 alembic upgrade head            # 테이블 생성
@@ -130,9 +130,9 @@ collectors/   플랫폼별 수집기
 ### 최소 예시
 
 ```python
-from review_crawler.core.base import BaseCollector
-from review_crawler.core.exceptions import NotSupportedError
-from review_crawler.core.models import Product, Review
+from review_data.core.base import BaseCollector
+from review_data.core.exceptions import NotSupportedError
+from review_data.core.models import Product, Review
 
 
 class KurlyCollector(BaseCollector):
@@ -172,7 +172,7 @@ class KurlyCollector(BaseCollector):
 `BrowserCollector` 를 상속하면 Playwright 를 쓸 수 있습니다. `self.client`(httpx)도 그대로 사용 가능하므로, 상품은 API·리뷰는 렌더링 같은 혼합 방식도 됩니다.
 
 ```python
-from review_crawler.core.browser import BrowserCollector
+from review_data.core.browser import BrowserCollector
 
 
 class MusinsaCollector(BrowserCollector):

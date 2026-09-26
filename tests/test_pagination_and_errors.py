@@ -10,14 +10,14 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from review_crawler.api.app import app
-from review_crawler.core.db.repository import (
+from review_data.api.app import app
+from review_data.core.db.repository import (
     InvalidCursorError,
     ProductRepository,
     ReviewRepository,
     _encode_review_cursor,
 )
-from review_crawler.core.models import Product, Review
+from review_data.core.models import Product, Review
 
 PLATFORM = "pageplat"
 PRODUCT_ID = "page-1"

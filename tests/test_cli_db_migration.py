@@ -6,12 +6,12 @@ conftest.py 의 engine fixture가 로컬 Postgres 접속을 시도하며, 접속
 fixture만 받아 스키마 준비만 보장한다.
 """
 
-from review_crawler.cli import _collect_products, _collect_reviews
-from review_crawler.collectors.auction import manual_entry
-from review_crawler.core.base import BaseCollector
-from review_crawler.core.db.base import session_scope
-from review_crawler.core.db.repository import ProductRepository, ReviewRepository
-from review_crawler.core.models import Product, Review
+from review_data.cli import _collect_products, _collect_reviews
+from review_data.collectors.auction import manual_entry
+from review_data.core.base import BaseCollector
+from review_data.core.db.base import session_scope
+from review_data.core.db.repository import ProductRepository, ReviewRepository
+from review_data.core.models import Product, Review
 
 
 class _CliStubCollector(BaseCollector):

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from review_crawler.collectors.elevenst.collector import ElevenstCollector, _to_int
+from review_data.collectors.elevenst.collector import ElevenstCollector, _to_int
 
 # 실제 응답에서 축약한 리뷰 한 건 조각
 REVIEW_LI = """
