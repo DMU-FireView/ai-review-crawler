@@ -153,3 +153,54 @@ def test_demo_route_error_has_meaningful_code(engine, client):
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+async def test_review_upsert_refreshes_updated_at(seeded):
+    """재수집 시 updated_at 이 갱신되어야 한다.
+
+    모델의 onupdate 는 ORM UPDATE 에만 걸리고 ON CONFLICT DO UPDATE 에는 적용되지
+    않는다. 갱신되지 않으면 변경 추적과 운영 조사가 잘못된 시각을 보게 된다.
+    """
+    repo = ReviewRepository(seeded)
+    rows, _ = await repo.list_page(PLATFORM, PRODUCT_ID, limit=1)
+    before = rows[0].updated_at
+
+    await repo.upsert_many(
+        PLATFORM,
+        PRODUCT_ID,
+        [
+            Review(
+                platform=PLATFORM,
+                product_id=PRODUCT_ID,
+                review_id=rows[0].review_id,
+                content="다시 수집한 내용",
+                written_at=rows[0].written_at,
+            )
+        ],
+    )
+    await seeded.commit()
+
+    # upsert 는 Core 문장이라 세션의 identity map 을 갱신하지 않는다. 실제 경로에서는
+    # 워커가 저장하고 API 가 별개 세션으로 읽으므로, 여기서도 캐시를 비우고 다시 읽는다.
+    seeded.expire_all()
+    rows_after, _ = await repo.list_page(PLATFORM, PRODUCT_ID, limit=1)
+    assert rows_after[0].content == "다시 수집한 내용"
+    assert rows_after[0].updated_at > before, "재수집했는데 updated_at 이 그대로입니다."
+
+
+async def test_product_upsert_refreshes_updated_at(session):
+    product = Product(platform=PLATFORM, product_id="upd-1", name="처음", url="https://a")
+    repo = ProductRepository(session)
+    await repo.upsert(product)
+    await session.commit()
+    before = (await repo.get(PLATFORM, "upd-1")).updated_at
+
+    await repo.upsert(
+        Product(platform=PLATFORM, product_id="upd-1", name="바뀜", url="https://b")
+    )
+    await session.commit()
+
+    session.expire_all()
+    row = await repo.get(PLATFORM, "upd-1")
+    assert row.name == "바뀜"
+    assert row.updated_at > before, "재수집했는데 updated_at 이 그대로입니다."

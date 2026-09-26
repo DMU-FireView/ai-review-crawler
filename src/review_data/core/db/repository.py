@@ -26,6 +26,8 @@ DEFAULT_LEASE_SECONDS = 120
 # 플랫폼별 상한이 따로 지정되지 않았을 때 쓰는 기본 동시 실행 상한.
 DEFAULT_PLATFORM_CAP = 4
 
+# ON CONFLICT DO UPDATE 로 덮어쓸 컬럼. updated_at 이 빠지면 재수집해도 갱신되지
+# 않는다 — 모델의 onupdate 는 ORM UPDATE 에만 걸린다.
 _REVIEW_UPDATE_COLUMNS = (
     "content",
     "rating",
@@ -35,6 +37,7 @@ _REVIEW_UPDATE_COLUMNS = (
     "images",
     "helpful_count",
     "last_collected_at",
+    "updated_at",
 )
 
 
@@ -97,6 +100,9 @@ class ProductRepository:
             "review_count": product.review_count,
             "rating": product.rating,
             "last_collected_at": datetime.now(UTC),
+            # ON CONFLICT DO UPDATE 에는 모델의 onupdate 가 적용되지 않는다. 직접 넣지
+            # 않으면 몇 번을 다시 수집해도 updated_at 이 최초 insert 시각에 머문다.
+            "updated_at": datetime.now(UTC),
         }
         stmt = pg_insert(ProductRow).values(
             platform=product.platform, product_id=product.product_id, **values
@@ -179,6 +185,7 @@ class ReviewRepository:
                 "images": review.images,
                 "helpful_count": review.helpful_count,
                 "last_collected_at": now,
+                "updated_at": now,
             }
             for review in reviews
         ]
