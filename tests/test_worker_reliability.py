@@ -11,13 +11,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from review_crawler.core.base import BaseCollector
-from review_crawler.core.db.repository import (
+from review_data.core.base import BaseCollector
+from review_data.core.db.repository import (
     CollectionJobRepository,
     ProductRepository,
 )
-from review_crawler.core.models import Product, Review
-from review_crawler.worker import collection_worker
+from review_data.core.models import Product, Review
+from review_data.worker import collection_worker
 
 PLATFORM = "relyplat"
 

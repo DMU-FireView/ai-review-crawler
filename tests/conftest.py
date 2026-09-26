@@ -14,8 +14,8 @@ import os
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from review_crawler.core.db.base import Base, create_session_factory
-from review_crawler.core.settings import get_settings
+from review_data.core.db.base import Base, create_session_factory
+from review_data.core.settings import get_settings
 
 DATABASE_URL = os.environ.get("DATABASE_URL", get_settings().database_url)
 

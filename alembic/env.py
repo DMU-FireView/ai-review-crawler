@@ -6,9 +6,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from review_crawler.core.db import models  # noqa: F401 - Base.metadata 등록용
-from review_crawler.core.db.base import Base
-from review_crawler.core.settings import get_settings
+from review_data.core.db import models  # noqa: F401 - Base.metadata 등록용
+from review_data.core.db.base import Base
+from review_data.core.settings import get_settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

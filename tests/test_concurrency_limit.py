@@ -8,12 +8,12 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from review_crawler.core.base import BaseCollector
-from review_crawler.core.browser import BrowserCollector
-from review_crawler.core.db.repository import CollectionJobRepository
-from review_crawler.core.models import Product, Review
-from review_crawler.core.settings import Settings
-from review_crawler.worker import collection_worker
+from review_data.core.base import BaseCollector
+from review_data.core.browser import BrowserCollector
+from review_data.core.db.repository import CollectionJobRepository
+from review_data.core.models import Product, Review
+from review_data.core.settings import Settings
+from review_data.worker import collection_worker
 
 BROWSER_PLATFORM = "browserplat"
 HTTP_PLATFORM = "httpplat"

@@ -8,7 +8,7 @@ TestClient는 컨텍스트 매니저로 열어야 요청들이 하나의 이벤�
 import pytest
 from fastapi.testclient import TestClient
 
-from review_crawler.api.app import app
+from review_data.api.app import app
 
 
 @pytest.fixture(scope="module")

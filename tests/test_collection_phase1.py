@@ -7,17 +7,17 @@ conftest.py 의 engine/session fixture가 로컬 Postgres 접속을 시도하며
 
 from datetime import UTC, datetime, timedelta
 
-from review_crawler.core.base import BaseCollector
-from review_crawler.core.db.models import ProductRow
-from review_crawler.core.db.repository import (
+from review_data.core.base import BaseCollector
+from review_data.core.db.models import ProductRow
+from review_data.core.db.repository import (
     CollectionJobRepository,
     ProductRepository,
     ReviewRepository,
 )
-from review_crawler.core.exceptions import CollectorError
-from review_crawler.core.models import Product, Review
-from review_crawler.core.service.collection import CollectionService
-from review_crawler.worker import collection_worker
+from review_data.core.exceptions import CollectorError
+from review_data.core.models import Product, Review
+from review_data.core.service.collection import CollectionService
+from review_data.worker import collection_worker
 
 
 async def test_fresh_product_returns_immediately(session):
