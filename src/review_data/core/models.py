@@ -20,8 +20,10 @@ class Product(BaseModel):
     # ── 필수 ──────────────────────────────
     platform: str = Field(description="플랫폼 식별자 (collector 폴더명과 동일)")
     product_id: str = Field(description="해당 플랫폼 내 원본 상품 ID")
-    name: str
-    url: str
+    # 빈 문자열을 막는다. 없는 상품에도 200 을 주는 플랫폼이 있어서, 파싱 실패가
+    # 이름 없는 상품으로 저장되고 수집 성공으로 기록되는 일이 실제로 있었다.
+    name: str = Field(min_length=1)
+    url: str = Field(min_length=1)
 
     # ── 동일 상품 매칭 기준 후보 ────────────
     # 여러 플랫폼의 같은 상품을 하나로 묶을 때 사용합니다.
@@ -45,8 +47,8 @@ class Review(BaseModel):
     # ── 필수 ──────────────────────────────
     platform: str
     product_id: str = Field(description="이 리뷰가 달린 상품의 platform 내 ID")
-    review_id: str
-    content: str
+    review_id: str = Field(min_length=1)
+    content: str = Field(min_length=1)
 
     # ── 부가 정보 ──────────────────────────
     rating: float | None = Field(default=None, description="5점 만점 환산")
