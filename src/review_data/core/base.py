@@ -79,10 +79,10 @@ class BaseCollector(ABC):
                 await self._client.aclose()
                 self._client = None
 
-    async def setup(self) -> None:
+    async def setup(self) -> None:  # noqa: B027 - 선택적 리소스 훅
         """추가 준비가 필요하면 오버라이드하세요 (선택)."""
 
-    async def teardown(self) -> None:
+    async def teardown(self) -> None:  # noqa: B027 - 선택적 리소스 훅
         """추가 정리가 필요하면 오버라이드하세요 (선택)."""
 
     @property
